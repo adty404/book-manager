@@ -17,14 +17,19 @@ class ShowBookDetail extends Command
         $title = $this->argument('title');
         $this->info('Menampilkan detail buku dengan judul: ' . $title);
 
-        $book = Book::where('title', $title)->with('author')->first();
+        $books = Book::where('title', 'like', '%' . $title . '%')->with('author')->get();
 
-        if ($book) {
-            $this->line('Judul: ' . $book->title);
-            $this->line('Penulis: ' . $book->author->name);
-            $this->line('Stock: ' . $book->stock);
-        } else {
-            $this->warn('Buku dengan judul ' . $title . ' tidak ditemukan.');
-        }
+        $this->table(
+            ['Judul', 'Penulis', 'Stock'],
+            $books->map(fn($book) => [$book->title, $book->author->name, $book->stock])
+        );
+
+        // if ($book) {
+        //     $this->line('Judul: ' . $book->title);
+        //     $this->line('Penulis: ' . $book->author->name);
+        //     $this->line('Stock: ' . $book->stock);
+        // } else {
+        //     $this->warn('Buku dengan judul ' . $title . ' tidak ditemukan.');
+        // }
     }
 }
