@@ -6,7 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class Book extends Model
 {
-    protected $fillable = ['author_id', 'title', 'stock'];
+    protected $fillable = ['author_id', 'title', 'genre', 'stock', 'published'];
+
+    protected $casts = [
+        'published' => 'boolean',
+    ];
 
     public function author()
     {
