@@ -15,7 +15,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('author_id')->constrained()->onDelete('cascade');
             $table->string('title');
+            $table->string('genre')->nullable();
             $table->integer('stock')->default(0);
+            $table->boolean('published')->default(false);
             $table->timestamps();
         });
     }
