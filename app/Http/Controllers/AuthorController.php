@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendWelcomeEmail;
 use App\Models\Author;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -51,7 +52,19 @@ class AuthorController extends Controller
      */
     public function store(Request $request)
     {
-        //
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:authors,email',
+        ]);
+
+        $author = Author::create($validated);
+
+        SendWelcomeEmail::dispatch($author);
+
+        return response()->json([
+            'message' => 'Author created successfully.',
+            'data' => $author,
+        ]);
     }
 
     /**
@@ -90,6 +103,11 @@ class AuthorController extends Controller
         // Invalidate cache terkait author ini
         Cache::forget("authors.{$author->id}");
         Cache::forget('get-all-authors'); // Invalidate cache list
+
+        return response()->json([
+            'message' => 'Author updated successfully.',
+            'data' => $author,
+        ]);
     }
 
     /**

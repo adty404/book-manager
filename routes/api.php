@@ -10,5 +10,6 @@ Route::get('/user', function (Request $request) {
     return $request->user();
 })->middleware('auth:sanctum');
 
+Route::post('books/export', [BookController::class, 'export']);
 Route::apiResource('books', BookController::class);
 Route::apiResource('authors', AuthorController::class);

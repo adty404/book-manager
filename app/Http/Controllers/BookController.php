@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ExportBooksToCSV;
 use App\Models\Book;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -144,5 +145,22 @@ class BookController extends Controller
         // gunakan tag jika pakai Redis. Untuk file/database driver:
         Cache::forget('books.all.' . md5(''));     // tanpa filter
         Cache::forget('books.all.' . md5(null));   // null query
+    }
+
+    /**
+     * POST /api/books/export
+     * Export buku ke CSV (via queue)
+     */
+    public function export(Request $request): JsonResponse
+    {
+        $filename = 'books-' . now()->format('Y-m-d-His') . '.csv';
+
+        ExportBooksToCSV::dispatch($filename, $request->genre)
+            ->onQueue('exports');
+
+        return response()->json([
+            'message' => 'Export sedang diproses di background',
+            'filename' => $filename,
+        ], 202);
     }
 }
