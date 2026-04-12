@@ -16,7 +16,7 @@ class ShowAutorStats extends Command
     {
         $minBooks = $this->option('min-books');
 
-        $authors = Author::withCount('books')->groupBy('id')->having('books_count', '>=', $minBooks)->get();
+        $authors = Author::withCount('books')->having('books_count', '>=', $minBooks)->get();
 
         if ($authors->isEmpty()) {
             $this->warn("Tidak ada data author yang memenuhi kriteria");
