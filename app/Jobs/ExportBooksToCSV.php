@@ -14,12 +14,14 @@ class ExportBooksToCSV implements ShouldQueue
 
     public int $tries = 3;
     public int $timeout = 120;
-    public int $backoff = 10;
+    public int $backoff = 3;
 
     public function __construct(
         public string $filename,
         public ?string $genre = null
-    ) {}
+    ) {
+        $this->onQueue('exports');
+    }
 
     public function handle(): void
     {
@@ -50,6 +52,6 @@ class ExportBooksToCSV implements ShouldQueue
 
     public function failed(\Throwable $e): void
     {
-        Log::error("Export gagal: {$this->filename} — {$e->getMessage()}");
+        Log::error("Export gagal: {$this->filename} - {$e->getMessage()}");
     }
 }
