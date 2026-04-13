@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ExportBooksToCSV;
-use App\Models\Book;
+use App\Repositories\Interfaces\BookRepositoryInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -14,6 +14,8 @@ class BookController extends Controller
     // TTL terpusat — mudah diubah
     private const CACHE_TTL = 1800; // 30 menit
 
+    public function __construct(private BookRepositoryInterface $bookRepo) {}
+
     /**
      * GET /api/books
      * Ambil semua buku (dengan cache)
@@ -23,13 +25,7 @@ class BookController extends Controller
         $cacheKey = $request->has('genre') ? 'books.all.' . $request->genre : 'books.all';
 
         $books = Cache::remember($cacheKey, self::CACHE_TTL, function () use ($request) {
-            $query = Book::query();
-
-            if ($request->has('genre')) {
-                $query->where('genre', $request->genre);
-            }
-
-            return $query->get();
+            return $this->bookRepo->getAll($request->genre);
         });
 
         if ($books->isEmpty()) {
@@ -55,9 +51,8 @@ class BookController extends Controller
         $cacheKey = "books.{$id}";
 
         $book = Cache::remember($cacheKey, 3600, function () use ($id) {
-            return Book::find($id);
+            return $this->bookRepo->findById($id);
         });
-
 
         if (!$book) {
             return response()->json([
@@ -66,8 +61,8 @@ class BookController extends Controller
             ], 404);
         }
 
-        Cache::increment($cacheKey . '.views', 1);
-        Log::info("[VIEW] Book ID {$id} sudah dilihat " . Cache::get($cacheKey . '.views', 0) . " kali");
+        $views = Cache::increment($cacheKey . '.views');
+        Log::info("[VIEW] Book ID {$id} sudah dilihat {$views} kali");
 
         return response()->json([
             'data' => $book,
@@ -88,7 +83,7 @@ class BookController extends Controller
             'published' => 'required|boolean',
         ]);
 
-        $book = Book::create($validated);
+        $book = $this->bookRepo->create($validated);
 
         Cache::forget('books.all');
         if ($book->genre) {
@@ -104,7 +99,13 @@ class BookController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        $book = Book::findOrFail($id);
+        $book = $this->bookRepo->findById($id);
+        if (!$book) {
+            return response()->json([
+                'message' => 'Buku tidak ditemukan',
+                'data' => null,
+            ], 404);
+        }
         $oldGenre = $book->genre;
 
         $validated = $request->validate([
@@ -115,7 +116,7 @@ class BookController extends Controller
             'published' => 'required|boolean',
         ]);
 
-        $book->update($validated);
+        $book = $this->bookRepo->update($id, $validated);
 
         if ($oldGenre) Cache::forget("books.all.{$oldGenre}");
         if ($book->genre && $book->genre !== $oldGenre) {
@@ -133,8 +134,16 @@ class BookController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
-        $book = Book::findOrFail($id);
-        $book->delete();
+        $book = $this->bookRepo->findById($id);
+        if (!$book) {
+            return response()->json(
+                [
+                    'message' => 'Buku tidak ditemukan',
+                ],
+                404
+            );
+        }
+        $this->bookRepo->delete($id);
 
         Cache::forget("books.{$id}");
         Cache::forget('books.all');
