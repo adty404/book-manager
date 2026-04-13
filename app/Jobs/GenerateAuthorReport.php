@@ -5,8 +5,8 @@ namespace App\Jobs;
 use App\Models\Author;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 class GenerateAuthorReport implements ShouldQueue
 {
@@ -14,19 +14,27 @@ class GenerateAuthorReport implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public string $filename) {}
+    public function __construct() {
+        $this->onQueue('reports');
+    }
 
     public function handle(): void
     {
-        $authors = Author::withCount('books')->get();
-        $csv = "ID,Name,Email,Total Books\n";
+        $authors = Author::with('books')->get();
 
         foreach ($authors as $author) {
-            $csv .= "{$author->id},{$author->name},{$author->email},{$author->books_count}\n";
+            $reportLog = "[REPORT] {$author->name} - {$author->books->count()} buku, total stock: {$author->books->sum('stock')}";
+            Log::info($reportLog);
         }
 
-        Storage::put("reports/{$this->filename}", $csv);
+        $summary = $authors->map(fn ($a) => [
+            'name' => $a->name,
+            'total_books' => $a->books->count(),
+            'total_stock' => $a->books->sum('stock'),
+        ])->toArray();
 
-        Log::info("Author report selesai: {$this->filename}");
+        Cache::put('report.authors', $summary, 3600);
+
+        Log::info("[REPORT] Summary cached ke report.authors");
     }
 }

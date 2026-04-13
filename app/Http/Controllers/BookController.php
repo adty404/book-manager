@@ -7,6 +7,7 @@ use App\Models\Book;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class BookController extends Controller
 {
@@ -19,28 +20,29 @@ class BookController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        // Cache key dinamis berdasarkan query params
-        $cacheKey = 'books.all.' . md5($request->getQueryString() ?? '');
+        $cacheKey = $request->has('genre') ? 'books.all.' . $request->genre : 'books.all';
 
         $books = Cache::remember($cacheKey, self::CACHE_TTL, function () use ($request) {
-            $query = Book::with('author');
+            $query = Book::query();
 
-            // Filter by genre
             if ($request->has('genre')) {
                 $query->where('genre', $request->genre);
             }
 
-            // Filter by published
-            if ($request->has('published')) {
-                $query->where('published', filter_var($request->published, FILTER_VALIDATE_BOOLEAN));
-            }
-
-            return $query->latest()->get()->toArray();
+            return $query->get();
         });
 
+        if ($books->isEmpty()) {
+            return response()->json([
+                'message' => 'Tidak ada buku yang ditemukan',
+                'data' => [],
+                'total' => 0,
+            ]);
+        }
+
         return response()->json([
-            'data'    => $books,
-            'total'   => count($books),
+            'data' => $books,
+            'total' => $books->count(),
         ]);
     }
 
@@ -50,16 +52,26 @@ class BookController extends Controller
      */
     public function show(int $id): JsonResponse
     {
-        $book = Cache::remember("books.{$id}", self::CACHE_TTL, function () use ($id) {
-            $found = Book::with('author')->find($id);
-            return $found ? $found->toArray() : null;
+        $cacheKey = "books.{$id}";
+
+        $book = Cache::remember($cacheKey, 3600, function () use ($id) {
+            return Book::find($id);
         });
 
+
         if (!$book) {
-            return response()->json(['message' => 'Buku tidak ditemukan.'], 404);
+            return response()->json([
+                'message' => 'Buku tidak ditemukan',
+                'data' => null,
+            ], 404);
         }
 
-        return response()->json(['data' => $book]);
+        Cache::increment($cacheKey . '.views', 1);
+        Log::info("[VIEW] Book ID {$id} sudah dilihat " . Cache::get($cacheKey . '.views', 0) . " kali");
+
+        return response()->json([
+            'data' => $book,
+        ]);
     }
 
     /**
@@ -72,15 +84,16 @@ class BookController extends Controller
             'author_id' => 'required|exists:authors,id',
             'title'     => 'required|string|max:255',
             'genre'     => 'nullable|string|max:100',
-            'stock'     => 'integer|min:0',
-            'published' => 'boolean',
+            'stock'     => 'required|integer|min:0',
+            'published' => 'required|boolean',
         ]);
 
         $book = Book::create($validated);
-        $book->load('author');
 
-        // Invalidate semua cache books (pakai prefix flush)
-        $this->clearBooksCache();
+        Cache::forget('books.all');
+        if ($book->genre) {
+            Cache::forget('books.all.' . $book->genre);
+        }
 
         return response()->json(['data' => $book], 201);
     }
@@ -91,26 +104,25 @@ class BookController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
-        $book = Book::find($id);
-
-        if (!$book) {
-            return response()->json(['message' => 'Buku tidak ditemukan.'], 404);
-        }
+        $book = Book::findOrFail($id);
+        $oldGenre = $book->genre;
 
         $validated = $request->validate([
-            'author_id' => 'sometimes|exists:authors,id',
-            'title'     => 'sometimes|string|max:255',
+            'author_id' => 'required|exists:authors,id',
+            'title'     => 'required|string|max:255',
             'genre'     => 'nullable|string|max:100',
-            'stock'     => 'sometimes|integer|min:0',
-            'published' => 'sometimes|boolean',
+            'stock'     => 'required|integer|min:0',
+            'published' => 'required|boolean',
         ]);
 
         $book->update($validated);
-        $book->load('author');
 
-        // Invalidate cache buku ini + list
+        if ($oldGenre) Cache::forget("books.all.{$oldGenre}");
+        if ($book->genre && $book->genre !== $oldGenre) {
+            Cache::forget("books.all.{$book->genre}");
+        }
         Cache::forget("books.{$id}");
-        $this->clearBooksCache();
+        Cache::forget('books.all');
 
         return response()->json(['data' => $book]);
     }
@@ -121,30 +133,22 @@ class BookController extends Controller
      */
     public function destroy(int $id): JsonResponse
     {
-        $book = Book::find($id);
-
-        if (!$book) {
-            return response()->json(['message' => 'Buku tidak ditemukan.'], 404);
-        }
-
+        $book = Book::findOrFail($id);
         $book->delete();
 
         Cache::forget("books.{$id}");
-        $this->clearBooksCache();
+        Cache::forget('books.all');
 
-        return response()->json(['message' => 'Buku berhasil dihapus.']);
-    }
+        if ($book->genre) {
+            Cache::forget("books.all.{$book->genre}");
+        }
 
-    /**
-     * Hapus semua cache books.all.*
-     * (cache key dinamis berdasarkan query string)
-     */
-    private function clearBooksCache(): void
-    {
-        // Karena key dinamis (ada md5), kita simpan daftarnya atau
-        // gunakan tag jika pakai Redis. Untuk file/database driver:
-        Cache::forget('books.all.' . md5(''));     // tanpa filter
-        Cache::forget('books.all.' . md5(null));   // null query
+        return response()->json(
+            [
+                'message' => 'Buku berhasil dihapus',
+            ],
+            200
+        );
     }
 
     /**

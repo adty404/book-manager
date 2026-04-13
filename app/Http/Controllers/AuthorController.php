@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CacheWarmupJob;
 use App\Jobs\SendWelcomeEmail;
 use App\Models\Author;
 use Illuminate\Http\Request;
@@ -17,21 +18,16 @@ class AuthorController extends Controller
      */
     public function index(Request $request)
     {
-        $cacheKey = 'authors.all.' . md5($request->getQueryString() ?? '');
+        $cacheKey = 'authors.all';
 
-        $authors = Cache::remember('get-all-authors', self::CACHE_TTL, function () use ($request) {
-            $query = Author::with('books');
-
-            if ($request->has('name')) {
-                $query->where('name', $request->name);
-            }
-
-            if ($request->has('email')) {
-                $query->where('email', $request->email);
-            }
-
-            return $query->latest()->get()->toArray();
-        });
+        if ($request->hasAny(['name', 'email'])) {
+            $authors = Author::with('books')
+                ->when($request->name, fn ($q) => $q->where('name', 'like', '%' . $request->name . '%'))
+                ->when($request->email, fn ($q) => $q->where('email', 'like', '%' . $request->email . '%'))
+                ->get();
+        } else {
+            $authors = Cache::remember($cacheKey, 3600, fn () => Author::with('books')->get());
+        }
 
         return response()->json([
             'data' => $authors,
@@ -72,7 +68,15 @@ class AuthorController extends Controller
      */
     public function show(Author $author)
     {
-        //
+        $cacheKey = "authors.{$author->id}";
+
+        $author = Cache::remember($cacheKey, 3600, function () use ($author) {
+            return Author::with('books')->find($author->id);
+        });
+
+        return response()->json([
+            'data' => $author,
+        ]);
     }
 
     /**
@@ -102,7 +106,7 @@ class AuthorController extends Controller
 
         // Invalidate cache terkait author ini
         Cache::forget("authors.{$author->id}");
-        Cache::forget('get-all-authors'); // Invalidate cache list
+        Cache::forget('authors.all'); // Invalidate cache list
 
         return response()->json([
             'message' => 'Author updated successfully.',
@@ -115,6 +119,17 @@ class AuthorController extends Controller
      */
     public function destroy(Author $author)
     {
-        //
+        $author = Author::findOrFail($author->id);
+
+        Cache::forget('authors.all'); // Invalidate cache list
+        Cache::forget("authors.{$author->id}");
+
+        $author->delete();
+
+        CacheWarmupJob::dispatch();
+
+        return response()->json([
+            'message' => 'Author deleted successfully.',
+        ]);
     }
 }
